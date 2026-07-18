@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data — raw pulls, immutable universe files, OS-locked holdout partition
+data/
+
+# Registry DB
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# OS
+.DS_Store

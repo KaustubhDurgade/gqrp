@@ -1,0 +1,68 @@
+# decisions — resolved & explicitly deferred
+
+Settled. Don't relitigate without new evidence. Format: Decision / Why / How to apply.
+
+## 1. Language & runtime — Python 3.11+
+**Decision:** Python 3.11+, `pyproject.toml`, single package `gqrp/`.
+**Why:** every load-bearing library (vectorbt, ccxt, purgedcv, skfolio, numpy/pandas) is Python. No reason to fight it.
+**How to apply:** `pyproject.toml` with pinned deps; venv or uv. 3.11 for perf + typing.
+
+## 2. Backtest engine — open-source `vectorbt`
+**Decision:** `vectorbt` (polakowo), not vectorbtpro, not backtrader.
+**Why:** maintained, numpy-native, fast for weekly-rebalance sweeps. Prior-art verified.
+**How to apply:** wrap in `backtest/engine.py`; keep vectorbt types out of the rest of the codebase behind that wrapper. **License guardrail:** source-available, non-commercial-sale — this stays a personal research tool; if it ever goes commercial, revisit the engine choice.
+
+## 3. CPCV + overfitting stats — `purgedcv` (AVOID mlfinlab)
+**Decision:** adopt `purgedcv` for combinatorial purged CV, PSR, Deflated Sharpe, MinTRL. Cross-check against `skfolio` (CPCV) and `rubenbriones/Probabilistic-Sharpe-Ratio` (formulas). **mlfinlab is banned** (paid closed-source).
+**Why:** open, sklearn-compatible, covers §8 + §13 in one dep. mlfinlab can't be a dependency.
+**How to apply:** `backtest/cv.py` wires CPCV; `metrics/panel.py` calls purgedcv's DSR/PSR. **Verify purgedcv's license before pinning** (open item O1). Add a unit test asserting our DSR matches the rubenbriones reference on a known input.
+
+## 4. Trial registry — append-only SQLite/WAL, separate process
+**Decision:** SQLite in WAL mode, written only by a standalone writer daemon (`registry/server.py`); everyone else uses a **read-only** client (`registry/client.py`).
+**Why:** the registry is the statistical spine (§6) — immutability must be structural, not policy. If compromised, nothing else means anything.
+**How to apply:** enforce immutability with ALL of: (a) separate OS process owning the DB file, (b) no UPDATE/DELETE anywhere in the writer's code path, (c) `BEFORE UPDATE`/`BEFORE DELETE` triggers that `RAISE(ABORT,...)`, (d) filesystem perms so only the daemon can write. Cumulative-N is **computed** from rows, never a mutable counter. This same read-only client is what any Phase-2 agent gets — no write path is ever added.
+
+## 5. Historical data source — Binance-primary via `data.binance.vision`
+**Decision:** ground truth = `data.binance.vision` klines (incl. delisted pairs) + Binance listing/delisting announcements for lifecycle dates. ccxt = live/testnet + current-symbol only. Aggregators (CoinGecko/CMC) = cross-check only, never sole source for a lifecycle date.
+**Why:** ccxt cannot supply delisted history or point-in-time availability (§2.1); aggregators have documented gaps exactly where survivorship bias bites. Honest-smaller > large-silently-wrong.
+**How to apply:** `data/binance_source.py` + `data/lifecycle.py` build `symbol_lifecycle`; unsourceable assets are **excluded**, not approximated. If a candidate can't be cleanly sourced after both sources → blocking, escalate.
+
+## 6. Holdout enforcement — OS-level, not prompt-level
+**Decision:** holdout-window data (2025-01-01 → 2026-09-30) is physically inaccessible to the development process. Enforced at the OS/filesystem layer.
+**Why:** §10 — "one evaluation ever" is meaningless if dev code can read holdout data. Prompt instructions don't enforce anything.
+**How to apply:** store holdout-partition files outside the dev process's readable path (separate owner + mode `000`, or a separate volume). `discipline/holdout_guard.py` raises loudly if a holdout path is opened during dev. Forward-test tooling reads only post-2026-09-30 data.
+
+## 7. Run-type tagging — structural, no retag path
+**Decision:** every trial tagged `research` or `pipeline-validation` at creation (§6.1); `pipeline-validation` excluded from cumulative weighted N; no code path retags/promotes it.
+**Why:** stops seed/debug runs from burning statistical budget, and stops post-hoc "that one should have counted."
+**How to apply:** tag is a required, immutable column on `trial`. Cumulative-N query filters `run_type='research'`. There is deliberately no update endpoint. An interesting `pipeline-validation` result = a brand-new `research` family from the memo stage.
+
+## 8. Universe scope — Binance-listed only
+**Decision:** universe is Binance-listed spot mid-caps; exclude stablecoins, wrapped assets, and anything unsourceable.
+**Why:** ground-truth lifecycle dates beat a broader but silently-wrong cross-venue universe.
+**How to apply:** `data/universe.py` monthly PIT ranking with config liquidity floor; output hash-locked immutable file referenced by every backtest.
+
+## 9. Agent layer — DEFERRED to Phase 2 (human is the research agent)
+**Decision:** no LLM agents in the memo/review/audit loop in Phase 1. Human writes memos, does adversarial review, runs audit.
+**Why:** mechanism-first ordering has no technical enforcement — a model confabulates a plausible mechanism for any primitive set post-hoc (§0.1). Writing your own memo *is* the enforcement, and serves the learning goal.
+**How to apply:** implement the three roles as explicit interfaces in `roles/` (memo/review/audit) that a human fills now — so Phase 2 can swap in agents behind the same seam additively.
+**Deferral trigger:** hypothesis *generation* becomes the demonstrated bottleneck after ~1 year of Phase 1 (won't happen at 40–60/yr). Even then, agent-written memos get more skepticism, memo hash-locked before primitive-library access, falsification condition must reference a pre-registered automated test.
+
+## 10. Holdout window — fixed 2025-01-01 → 2026-09-30, locked 2026-07-18
+**Decision:** fixed start and end (not open-ended "2025+"), hash-locked at project start.
+**Why:** an unbounded window keeps absorbing new data as wall-clock advances, blurring holdout vs forward-test and making "one evaluation ever" ambiguous. End set ~2.5 months out from lock so §14 steps 1–6 run entirely on the future side of the boundary, crossed intentionally.
+**How to apply:** window constants in `discipline/windows.py`, hash recorded. Dev running past 2026-09-30 is a schedule signal, not a reason to extend.
+
+---
+
+## Explicitly deferred (with reopening trigger)
+
+- **D-defer-1 — Fleet orchestration** (parallel candidates, auto-kill, monitoring). Trigger: >1 live paper-trading candidate at once is a real problem. Until then, single-candidate manual (§12).
+- **D-defer-2 — Negative-KB automation.** Trigger: manual log (`docs/` or a table) becomes unwieldy. Useful as a plain manual log from day one.
+- **D-defer-3 — Funding-rate carry / basis** as first *real* hypothesis. Trigger: pipeline validated via seed momentum (build step 6). Strongest-prior mechanism (§15).
+- **D-defer-4 — News/sentiment features.** Forward-only in paper trading; historical PIT crypto news is unreliable. Phase 3.
+- **D-defer-5 — Equities universe.** Needs paid PIT constituent data. Phase 3.
+
+## Open items (resolve during build, not blocking scaffolding)
+- **O1** — Confirm `purgedcv` exact license before pinning it as a dependency (expected MIT/BSD). If restrictive, fall back to skfolio CPCV + ported DSR/PSR from rubenbriones.
+- **O2** — GATE 0 data-sourcing spike (see STATE / roadmap): prove `data.binance.vision` actually covers a known-delisted pair back to its listing before building anything else. **Not yet run.**
