@@ -2,10 +2,19 @@
 
 Read first; update before finishing.
 
-**Last updated:** 2026-07-18  **Phase:** Phase 1 step 2 COMPLETE — trial registry (append-only, structural immutability); backtest/metrics track next
+**Last updated:** 2026-07-18  **Phase:** Phase 1 step 3 IN PROGRESS — metrics panel + both gates done (DSR verified vs reference); vectorbt engine + CPCV remain
 
 ## Now / in progress
-Branch `feat/data-pipeline` (3 commits + uncommitted registry). **Phase 1 steps 1 & 2 done.** Universe pipeline + the trial registry, both proven on live data. Registry not yet committed. Next heavy track = backtest runner + metrics/gates (separate session).
+Branch `feat/backtest-metrics` (off `main`). **Steps 1 & 2 complete; step 3 partway.** Done this session: discipline layer (Window + holdout guard), then the **metrics panel + statistical & economic gates**. Remaining step-3 pieces = `backtest/engine.py` (vectorbt) + `backtest/cv.py` (purgedcv CPCV) — need vectorbt installed.
+
+**Shipped (step 3 — metrics + gates, spec §8/§9, D3/D7):**
+- `metrics/panel.py` — purgedcv isolated here (seam 6). `deflated_sharpe`/`probabilistic_sharpe` wrappers + returns-based panel (sharpe±annualized, max drawdown, skew, kurtosis, subperiod sign-stability, `variance_of_trial_sharpes`, `compute_panel`→`MetricsPanel`). Input validation at the boundary. **Portfolio metrics (turnover/capacity/factor exposure) deferred until the engine emits positions.**
+- `gates/statistical.py` — deflated Sharpe ≥ 0.95 given **live cumulative weighted N** from `registry.client` (seam 2); `n_trials_from_cumulative_n` rounds up (only ever stricter, §16).
+- `gates/economic.py` — §9 viability: capacity floor + cost-drag erosion; `EconomicInputs` dataclass. `gates/verdict.py` — shared `GateVerdict`.
+- `config.BARS_PER_YEAR=365`; `scipy>=1.11` added to `quant` extra (DSR reference cross-check).
+- `tests/{test_metrics,test_gates}.py` — 21 tests incl. the **D3 bar** (`test_dsr_matches_reference_formula`, abs=1e-12) + seam-2 (same edge fails as N rises). Guarded by `importorskip` so the stdlib-only core suite is unaffected. **105 offline + 1 network, ruff clean.** Quant deps now installed in `.venv` via uv (numpy 2.4.6, pandas 3.0.3, scipy, purgedcv 0.1.2; **vectorbt not yet**).
+
+**Verification (live evidence this session):** DSR ours == independent LdP/rubenbriones reference (exact to 0.0 on shared moments); statistical gate consumed live cumulative_N=1.7 from a real registry and deflated against it; §9 canonical death (Sharpe 1.1/5%/800%/$30k) rejected on the capacity floor.
 
 **Shipped (step 2 — the trial registry, spec §6/§A, D4/D7):**
 - `registry/schema.sql` — append-only `trial`, `trial_result`, `research_memo`, `negative_knowledge`; `BEFORE UPDATE`/`BEFORE DELETE` triggers `RAISE(ABORT)` on every history table. Weight table (family=1.0/variant=0.5/hyperparam=0.2) enforced by a CHECK tying weight↔level. `trial_result` FK+PK to `trial` makes "config before results" and "one result per trial" structural.
@@ -34,15 +43,14 @@ Branch `feat/data-pipeline` (3 commits + uncommitted registry). **Phase 1 steps 
 - Checksum-verified sourcing confirmed via `pytest -m network`.
 
 ## Next concrete step
-Continue **Phase 1 step 3 — backtest runner + metrics/gates** (spec §8/§9; decisions D2, D3). Discipline layer (sub-step 1) is DONE; remaining sub-steps need the `quant` optional-deps installed and are a fresh session (session-split rule):
-1. ~~`discipline/windows.py` + `discipline/holdout_guard.py` — Window object + OS-level holdout enforcement (D6/D10).~~ **DONE this session** (stdlib-only, committed).
-2. `backtest/engine.py` — vectorbt wrapper (consumes a `Window`; no vectorbt type escapes it, seam 6) + `backtest/cv.py` — purgedcv CPCV wiring.
-3. `metrics/panel.py` — deflated/probabilistic Sharpe via purgedcv; **unit test asserting DSR matches the rubenbriones reference** (D3). Reads live cumulative-N from `registry/client.py`.
-4. `gates/statistical.py` (deflated Sharpe > 0 @95% vs live N) + `gates/economic.py` (§9 viability).
-Needs the `quant` optional-deps installed (numpy/pandas/vectorbt/purgedcv) — data+registry are stdlib-only, this track is not.
-Verification bar (CLAUDE.md): show DSR matching the reference implementation.
+Finish **Phase 1 step 3 — the backtest engine** (spec §13; decisions D2, D3):
+1. `backtest/engine.py` — vectorbt wrapper. Consumes a `Window` (calls `holdout_guard.assert_range_allowed` before any load), emits a **return series + positions**. No vectorbt type escapes (seam 6). Requires `uv pip install "vectorbt>=0.26"` (heavy; not yet installed).
+2. `backtest/cv.py` — purgedcv CPCV wiring (`CombinatorialPurgedCV`) for backtest-path reconstruction (spec §13).
+3. Wire engine positions → the **deferred portfolio metrics** in `metrics/panel.py` (turnover/capacity/exposure concentration) and feed `gates/economic.py`.
+4. `scripts/run_backtest.py` — driver: universe snapshot + Window + memo → trial(config) → run → trial_result, config-before-results end-to-end.
+Verification bar: an end-to-end run that writes config to the registry BEFORE results and refuses a holdout Window.
 
-Non-blocking follow-ups (do only if needed): registry writer *daemon* process-isolation (D4 hardening); `paper_trade_run` table; `--cross-check` flag in `build_universe.py`; parallel history downloads (full-discovery run is slow — §2.1 "budget weeks").
+Non-blocking follow-ups: registry writer *daemon* process-isolation (D4 hardening); `paper_trade_run` table; `--cross-check` flag in `build_universe.py`; parallel history downloads (§2.1 "budget weeks").
 
 ## Open / unresolved
 - None blocking. (O1, O2 resolved 2026-07-18 — see decisions.md.)
@@ -56,6 +64,7 @@ Non-blocking follow-ups (do only if needed): registry writer *daemon* process-is
 - Forward-compat seams named (architecture.md): registry process, run-type→N, role interfaces, Window object, data-source adapter, engine wrapper.
 
 ## Session log (newest last)
+- **2026-07-18** — **Phase 1 step 3 — metrics panel + gates.** Built `metrics/panel.py` (purgedcv behind seam 6: deflated/probabilistic Sharpe + returns-based panel), `gates/statistical.py` (DSR ≥ 0.95 vs live cumulative-N, seam 2), `gates/economic.py` (§9 capacity + cost-drag), `gates/verdict.py`. Installed quant deps via uv (numpy/pandas/scipy/purgedcv; vectorbt deferred). 21 tests incl. **D3 bar (DSR == LdP reference, abs 1e-12)** and seam-2 (edge fails as N rises) → 105 offline + 1 network, ruff clean. Live proof: DSR matches reference exactly on shared moments; gate consumed live N=1.7 from a real registry; §9 canonical death rejected. Remaining step 3: `backtest/engine.py` (vectorbt) + `cv.py` + `run_backtest.py` driver. Branch `feat/backtest-metrics`.
 - **2026-07-18** — **Phase 1 step 3 started — discipline layer (seam 4).** Built `discipline/windows.py` (`Window` object; dev/validation/holdout from config; **D10 hash-lock** `LOCKED_WINDOWS_HASH` + `verify_windows_locked()` tripwire) and `discipline/holdout_guard.py` (D6: `assert_range_allowed`/`assert_day_allowed`/`assert_path_outside_holdout`, `HoldoutAccessError`; real enforcement = fs perms, this is the loud in-process complement). Stdlib-only. 15 tests → **84 offline + 1 network, ruff clean.** Live proof: windows match locked hash; a range crossing into 2025 and a holdout day both REJECTED; boundary edit breaks the lock. Remaining step 3 (engine/cv/metrics/gates) needs `quant` deps → next session.
 - **2026-07-18** — **Phase 1 step 2 COMPLETE — the trial registry.** Built `registry/{schema.sql,types.py,server.py,client.py}` (spec §6/§A, D4/D7). Structural immutability, not policy: `BEFORE UPDATE`/`BEFORE DELETE` triggers `RAISE(ABORT)` on all four history tables; writer (`RegistryWriter`) has no mutate method → no retag path (D7); reader (`RegistryReader`) opens `mode=ro` → driver rejects all writes (same client Phase-2 agents get, seam 1). Weight derived from level via a CHECK-enforced table; `trial_result` FK+PK makes config-before-results and one-result-per-trial structural. `cumulative_weighted_n` computed live, `pipeline-validation` excluded. 15 registry tests → **69 offline + 1 network, ruff clean.** Live proof: raw UPDATE/DELETE both aborted with "append-only … forbidden (D4)"; RO client write → "readonly database"; N=1.5 excluding a pipeline-validation trial. Deferred (non-blocking): socket-isolated writer daemon (immutability already structural). Next: backtest/metrics track (step 3).
 - **2026-07-18** — **Phase 1 step 1 COMPLETE.** Added `data/coingecko.py` + `lifecycle.cross_check_existence` (aggregator existence corroboration → `verified`, D5; immutable). Live smoke: 13,696 CoinGecko symbols, SRM verified True, fake asset False. 54 offline + 1 network test, ruff clean. Universe pipeline done end-to-end (sourcing → lifecycle → PIT ranking → hash-locked immutable snapshot → cross-check). Next: registry track (step 2).

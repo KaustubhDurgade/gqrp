@@ -55,5 +55,8 @@ KNOWN_QUOTE_ASSETS = (
 # ── Economic viability gate (spec §9) ───────────────────────────────────────
 MIN_CAPACITY_USD = 50_000.0
 
+# ── Metrics (spec §8) ───────────────────────────────────────────────────────
+BARS_PER_YEAR = 365         # crypto trades every day, incl. weekends
+
 # ── Statistical gate (spec §8) ──────────────────────────────────────────────
 DEFLATED_SHARPE_CONFIDENCE = 0.95
