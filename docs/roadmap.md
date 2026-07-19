@@ -12,10 +12,10 @@ The single project-killing assumption: that survivorship-safe delisted history i
 
 ## Phase 1 — statistical infrastructure (manual; human = research agent)
 1. **Universe + delisting-aware data pipeline** (blocking) — `data/*`, `scripts/build_universe.py`. Output: hash-locked immutable `universe_snapshot`. *Budget weeks (spec §2.1).*
-   - [~] `symbol_lifecycle` from Binance-native source ✅ (`data/lifecycle.py`, checksum-verified `data/binance_source.py`); aggregator cross-check still TODO
-   - [ ] delisting-aware `ohlcv_bar` loading (`data/ohlcv.py`)
-   - [ ] monthly PIT ranking + liquidity floor + stablecoin/wrapped exclusion
-   - [ ] immutable hash-locked universe file
+   - [~] `symbol_lifecycle` from Binance-native source ✅ (`data/lifecycle.py`, checksum-verified `data/binance_source.py`, `list_all_symbols` discovery); aggregator cross-check still TODO
+   - [x] delisting-aware `ohlcv_bar` loading (`data/ohlcv.py`) — never serves bars after `delisting_date`
+   - [x] monthly PIT ranking + liquidity floor + stablecoin/wrapped exclusion (`data/universe.py`, ranking = avg daily quote volume per D12)
+   - [x] immutable hash-locked universe file (`write_snapshot` → read-only 0444, content-hash verified on load, refuses overwrite; driver `scripts/build_universe.py`)
 2. **Trial registry** — append-only SQLite/WAL, separate writer process, read-only client, run-type tagging, triggers + fs perms (decisions D4, D7).
    - [ ] schema + INSERT-only triggers
    - [ ] writer daemon; read-only counts/cumulative-N client

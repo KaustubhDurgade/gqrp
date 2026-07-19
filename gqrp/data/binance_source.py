@@ -76,6 +76,45 @@ def list_monthly_klines(symbol: str, interval: str = "1d") -> list[str]:
     return sorted(months)
 
 
+_KLINES_ROOT = "data/spot/monthly/klines/"
+
+
+def list_all_symbols() -> list[str]:
+    """Every symbol with published spot klines — current *and* delisted.
+
+    Paginates the S3 delimiter listing (CommonPrefixes). This is the survivorship-
+    safe symbol universe: delisted pairs appear here because their history is never
+    deleted (decision D5/D11). Filtering by quote/liquidity happens downstream.
+    Symbol directories are interval-agnostic, so no interval argument is needed.
+    """
+    root = _KLINES_ROOT
+    symbols: set[str] = set()
+    marker = ""
+    while True:
+        url = f"{_S3_LIST_ENDPOINT}?prefix={root}&delimiter=/"
+        if marker:
+            url += f"&marker={marker}"
+        root_el = ET.fromstring(_http_get(url))
+        prefixes = root_el.findall(".//s3:CommonPrefixes/s3:Prefix", _S3_NS)
+        for pre_el in prefixes:
+            pre = (pre_el.text or "").strip().rstrip("/")
+            sym = pre.rsplit("/", 1)[-1]
+            # Klines with a non-daily interval share the symbol dir; the symbol is
+            # the last path segment regardless of interval, so this holds.
+            if sym:
+                symbols.add(sym)
+        truncated = (root_el.findtext("s3:IsTruncated", default="false", namespaces=_S3_NS) or "").strip()
+        if truncated.lower() != "true":
+            break
+        next_marker = root_el.findtext("s3:NextMarker", default="", namespaces=_S3_NS) or ""
+        if not next_marker and prefixes:
+            next_marker = (prefixes[-1].text or "").strip()
+        if not next_marker:
+            break
+        marker = next_marker
+    return sorted(symbols)
+
+
 def _verify_checksum(zip_bytes: bytes, checksum_text: str, filename: str) -> None:
     """Raise DataSourceError unless SHA-256(zip_bytes) matches the published sum."""
     expected = checksum_text.split()[0].strip().lower() if checksum_text.split() else ""

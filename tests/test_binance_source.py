@@ -4,10 +4,12 @@ import zipfile
 
 import pytest
 
+from gqrp.data import binance_source
 from gqrp.data.binance_source import (
     DataSourceError,
     _unzip_csv,
     _verify_checksum,
+    list_all_symbols,
     parse_klines_csv,
 )
 
@@ -72,3 +74,36 @@ def test_checksum_verify_raises_on_mismatch():
 def test_checksum_verify_raises_on_malformed():
     with pytest.raises(DataSourceError, match="malformed"):
         _verify_checksum(b"x", "not-a-hash", "f.zip")
+
+
+_NS = 'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"'
+
+
+def _listing(prefixes, truncated=False, next_marker=""):
+    cps = "".join(
+        f"<CommonPrefixes><Prefix>data/spot/monthly/klines/{p}/</Prefix></CommonPrefixes>"
+        for p in prefixes
+    )
+    nm = f"<NextMarker>{next_marker}</NextMarker>" if next_marker else ""
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?><ListBucketResult {_NS}>'
+        f"<IsTruncated>{'true' if truncated else 'false'}</IsTruncated>{nm}{cps}"
+        "</ListBucketResult>"
+    ).encode()
+
+
+def test_list_all_symbols_paginates(monkeypatch):
+    pages = [
+        _listing(["AAAUSDT", "BBBUSDT"], truncated=True, next_marker="page2"),
+        _listing(["CCCUSDT", "AAAUSDT"], truncated=False),  # dup AAA across pages
+    ]
+    calls = []
+
+    def fake_get(url):
+        calls.append(url)
+        return pages[len(calls) - 1]
+
+    monkeypatch.setattr(binance_source, "_http_get", fake_get)
+    result = list_all_symbols()
+    assert result == ["AAAUSDT", "BBBUSDT", "CCCUSDT"]  # sorted, de-duped
+    assert "marker=page2" in calls[1]  # pagination marker forwarded

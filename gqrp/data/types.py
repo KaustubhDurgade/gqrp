@@ -85,3 +85,38 @@ class SymbolLifecycle:
         if self.delisting_date is not None and day > self.delisting_date:
             return False
         return True
+
+
+@dataclass(frozen=True, slots=True)
+class UniverseRow:
+    """One candidate in a monthly universe reconstruction (spec §A).
+
+    `avg_daily_volume` is the ranking key (decision D12 — Binance-native dollar
+    volume, not reconstructed market cap). `market_cap` is nullable, reserved for
+    a future aggregator annotation and never used for selection.
+    """
+
+    symbol: str
+    rank: int
+    avg_daily_volume: float
+    eligible: bool
+    market_cap: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UniverseSnapshot:
+    """Immutable, hash-locked monthly universe (spec §A `universe_snapshot`).
+
+    `content_hash` is the sha256 of the canonical serialization and is what every
+    backtest references. `config_hash` fingerprints the universe-defining config
+    so a parameter change produces a detectably different universe.
+    """
+
+    snapshot_date: date
+    config_hash: str
+    rows: tuple[UniverseRow, ...]
+    content_hash: str
+
+    @property
+    def eligible_symbols(self) -> tuple[str, ...]:
+        return tuple(r.symbol for r in self.rows if r.eligible)
