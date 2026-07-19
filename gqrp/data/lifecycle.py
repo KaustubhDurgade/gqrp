@@ -9,6 +9,7 @@ later step; until then `verified=False` and `source='binance-native'`.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
 
 from .. import config
@@ -82,3 +83,18 @@ def build_lifecycle(
         source=source,
         verified=verified,
     )
+
+
+def cross_check_existence(
+    lifecycle: SymbolLifecycle, known_symbols: set[str]
+) -> SymbolLifecycle:
+    """Corroborate a lifecycle's base asset against an aggregator's symbol set.
+
+    Existence check only (decision D5) — CoinGecko cannot supply lifecycle dates,
+    so this never touches listing/delisting. Returns a new lifecycle with
+    `verified=True` if the base asset is found; otherwise `verified=False`, meaning
+    "could not corroborate" — a flag for manual review, NOT grounds to drop the
+    symbol (Binance remains ground truth).
+    """
+    found = lifecycle.base_asset.lower() in known_symbols
+    return replace(lifecycle, verified=found)
