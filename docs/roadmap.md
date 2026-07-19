@@ -2,18 +2,18 @@
 
 Mirrors spec §14. Each phase is a checklist. Phase 1 is everything; Phase 2/3 are gated deferrals.
 
-## GATE 0 — data-sourcing spike (blocks everything) 🔴
-The single project-killing assumption: that survivorship-safe delisted history is actually obtainable. Prove it before writing the universe builder.
-- [ ] Fetch a known **delisted** Binance pair's daily klines from `data.binance.vision`, confirm coverage back to its listing date.
-- [ ] Locate Binance listing/delisting announcement dates for that pair; confirm they line up with the kline coverage edges.
-- [ ] Cross-check one aggregator (CoinGecko/CMC) against it; document the gap.
-- [ ] **Verdict:** sourceable cleanly? → proceed. Not? → escalate (spec §2.1 step 4), do not approximate.
-- [ ] Resolve O1 in passing: confirm `purgedcv` license.
+## GATE 0 — data-sourcing spike (blocks everything) ✅ PASSED 2026-07-18
+The single project-killing assumption: that survivorship-safe delisted history is actually obtainable. Proven against delisted **SRMUSDT** (details in decision D11).
+- [x] Fetch a known **delisted** Binance pair's daily klines from `data.binance.vision`, confirm coverage back to its listing date. — SRMUSDT, checksum-verified, **2020-08-11 → 2022-11-28**.
+- [x] Locate Binance listing/delisting announcement dates for that pair; confirm they line up with the kline coverage edges. — listing 2020-08-11 = first bar; announcement 2022-11-25 (terminate 2022-11-28) = partial final bar (intraday halt). Exact match.
+- [x] Cross-check one aggregator (CoinGecko/CMC) against it; document the gap. — CoinGecko confirms token existence but has **no exchange lifecycle dates** + 365-day free-history cap → cannot source the window. Confirms D5's aggregator-as-cross-check-only stance.
+- [x] **Verdict:** sourceable cleanly → **PROCEED**.
+- [x] Resolve O1 in passing: `purgedcv` license = **MIT** (v0.1.2).
 
 ## Phase 1 — statistical infrastructure (manual; human = research agent)
 1. **Universe + delisting-aware data pipeline** (blocking) — `data/*`, `scripts/build_universe.py`. Output: hash-locked immutable `universe_snapshot`. *Budget weeks (spec §2.1).*
-   - [ ] `symbol_lifecycle` from Binance-native source + aggregator cross-check
-   - [ ] delisting-aware `ohlcv_bar` loading
+   - [~] `symbol_lifecycle` from Binance-native source ✅ (`data/lifecycle.py`, checksum-verified `data/binance_source.py`); aggregator cross-check still TODO
+   - [ ] delisting-aware `ohlcv_bar` loading (`data/ohlcv.py`)
    - [ ] monthly PIT ranking + liquidity floor + stablecoin/wrapped exclusion
    - [ ] immutable hash-locked universe file
 2. **Trial registry** — append-only SQLite/WAL, separate writer process, read-only client, run-type tagging, triggers + fs perms (decisions D4, D7).

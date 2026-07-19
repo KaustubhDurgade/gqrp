@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gqrp"
+version = "0.0.1"
+description = "Governed Quantitative Research Platform — statistical infrastructure for crypto research"
+requires-python = ">=3.11"
+# Core is intentionally stdlib-only so the data layer runs with no heavy install.
+# Quant deps below are pulled in as later phases (backtest/metrics) come online.
+dependencies = []
+
+[project.optional-dependencies]
+# Phase 1 steps 3+ (backtest runner, metrics, gates). Data pipeline needs none of these.
+quant = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "vectorbt>=0.26",       # open-source (polakowo) — decision D2
+  "ccxt>=4.2",            # live/testnet + current-symbol only — decision D5
+  "purgedcv==0.1.2",      # MIT — CPCV + deflated/probabilistic Sharpe (decision D3, O1 resolved)
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
+  "mypy>=1.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["gqrp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "network: hits data.binance.vision (skipped by default; run with -m network)",
+]
+addopts = "-m 'not network'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -9,7 +9,8 @@ venv/
 .ruff_cache/
 
 # Data — raw pulls, immutable universe files, OS-locked holdout partition
-data/
+# (top-level only; do NOT match the gqrp/data source package)
+/data/
 
 # Registry DB
 *.sqlite

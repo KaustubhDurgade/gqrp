@@ -53,6 +53,11 @@ Settled. Don't relitigate without new evidence. Format: Decision / Why / How to 
 **Why:** an unbounded window keeps absorbing new data as wall-clock advances, blurring holdout vs forward-test and making "one evaluation ever" ambiguous. End set ~2.5 months out from lock so §14 steps 1–6 run entirely on the future side of the boundary, crossed intentionally.
 **How to apply:** window constants in `discipline/windows.py`, hash recorded. Dev running past 2026-09-30 is a schedule signal, not a reason to extend.
 
+## 11. GATE 0 verdict — data sourcing PASSES; D5 approach validated
+**Decision:** the project-killing assumption (§2.1 — survivorship-safe delisted history is obtainable) is **confirmed true**. Proceed to Phase 1. Spike run 2026-07-18 against delisted **SRMUSDT**.
+**Why:** `data.binance.vision` served SRMUSDT's full daily klines, checksum-verified, coverage **2020-08-11 → 2022-11-28**. Edges match exchange-native lifecycle exactly: first bar = Binance listing (2020-08-11); final bar is a *partial* day (open 2022-11-28 00:00, close 02:59 UTC) = intraday trading halt, matching Binance's 2022-11-25 announcement terminating SRM/USDT spot on 2022-11-28. Aggregator cross-check (CoinGecko) confirms the token existed but exposes **no exchange-specific listing/delisting dates** and caps free history at 365 days — i.e. it *cannot* source the 2020–2022 window at all. This is precisely the gap D5 predicted: aggregators = existence cross-check only, never a lifecycle source.
+**How to apply:** `data/binance_source.py` uses the S3 REST listing (`https://s3-ap-northeast-1.amazonaws.com/data.binance.vision?prefix=data/spot/monthly/klines/{SYMBOL}/1d/`) to discover coverage, downloads monthly zips, and **verifies the `.CHECKSUM` (SHA-256) on every file**. A partial final daily bar is the delisting/halt signal; treat the last bar's date as the effective `delisting_date` and cross-check against the Binance announcement. Timestamps are epoch-ms UTC.
+
 ---
 
 ## Explicitly deferred (with reopening trigger)
@@ -63,6 +68,6 @@ Settled. Don't relitigate without new evidence. Format: Decision / Why / How to 
 - **D-defer-4 — News/sentiment features.** Forward-only in paper trading; historical PIT crypto news is unreliable. Phase 3.
 - **D-defer-5 — Equities universe.** Needs paid PIT constituent data. Phase 3.
 
-## Open items (resolve during build, not blocking scaffolding)
-- **O1** — Confirm `purgedcv` exact license before pinning it as a dependency (expected MIT/BSD). If restrictive, fall back to skfolio CPCV + ported DSR/PSR from rubenbriones.
-- **O2** — GATE 0 data-sourcing spike (see STATE / roadmap): prove `data.binance.vision` actually covers a known-delisted pair back to its listing before building anything else. **Not yet run.**
+## Open items
+- ~~**O1** — Confirm `purgedcv` exact license.~~ **RESOLVED 2026-07-18:** MIT (LICENSE file "Copyright (c) 2026 Evgenii Lazarev" + PyPI classifier "License :: OSI Approved :: MIT License"). Latest **v0.1.2** (2026-06-13). Safe to pin. Fallback (skfolio + rubenbriones) no longer needed but kept as cross-check per D3.
+- ~~**O2** — GATE 0 data-sourcing spike.~~ **RESOLVED 2026-07-18:** PASS. See decision D11.
