@@ -2,10 +2,21 @@
 
 Read first; update before finishing.
 
-**Last updated:** 2026-07-18  **Phase:** Phase 1 step 1 COMPLETE — universe pipeline end-to-end; registry track next
+**Last updated:** 2026-07-18  **Phase:** Phase 1 step 2 COMPLETE — trial registry (append-only, structural immutability); backtest/metrics track next
 
 ## Now / in progress
-Branch `feat/data-pipeline` (3 commits). **Phase 1 step 1 done.** Universe + delisting-aware data pipeline with aggregator cross-check, all proven on live data. Next heavy track = the trial registry (separate session).
+Branch `feat/data-pipeline` (3 commits + uncommitted registry). **Phase 1 steps 1 & 2 done.** Universe pipeline + the trial registry, both proven on live data. Registry not yet committed. Next heavy track = backtest runner + metrics/gates (separate session).
+
+**Shipped (step 2 — the trial registry, spec §6/§A, D4/D7):**
+- `registry/schema.sql` — append-only `trial`, `trial_result`, `research_memo`, `negative_knowledge`; `BEFORE UPDATE`/`BEFORE DELETE` triggers `RAISE(ABORT)` on every history table. Weight table (family=1.0/variant=0.5/hyperparam=0.2) enforced by a CHECK tying weight↔level. `trial_result` FK+PK to `trial` makes "config before results" and "one result per trial" structural.
+- `registry/types.py` — immutable `Trial`/`TrialResult`/`ResearchMemo`/`NegativeKnowledge`; `weight_for(level)` derives weight (callers never pass it).
+- `registry/server.py` — `RegistryWriter`: the sole writer, append-only API only (no update/delete method exists → no retag path, D7). WAL; checkpoints on close so a RO client can open.
+- `registry/client.py` — `RegistryReader`: opens `mode=ro` (driver rejects all writes — the same client a Phase-2 agent gets, seam 1). `cumulative_weighted_n()` = Σ weight where `run_type='research'`, computed live; `pipeline-validation` excluded.
+- `tests/test_registry.py` — 15 tests (round-trip, config-before-results, one-result-per-trial, weight-from-level, N-excludes-pipeline-validation, UPDATE/DELETE trigger rejection, RO-client-cannot-write, memo hash-lock, negative-knowledge). **69 offline + 1 network total, ruff clean.**
+
+**Verification (live evidence this session):** raw `UPDATE trial SET run_type=...` → `trial is append-only: UPDATE forbidden (D4)`; raw `DELETE` → rejected; RO client write → `attempt to write a readonly database`; cumulative N = 1.5 with a pipeline-validation trial correctly excluded.
+
+**Not-yet-done (registry follow-ups, non-blocking):** the socket-isolated writer *daemon* (D4's "separate OS process") is not wired — immutability holds via triggers + no-mutate-path + RO client regardless of process topology; process isolation is a deferred hardening. No `paper_trade_run` table yet (Phase 1 paper-trading step). No `holdout` write-guard in the registry (that's `discipline/holdout_guard.py`, D6).
 
 **Shipped (step 1):**
 - `config.py`, `data/types.py` (`OhlcvBar`, `SymbolLifecycle`, `UniverseRow`, `UniverseSnapshot`).
@@ -23,13 +34,15 @@ Branch `feat/data-pipeline` (3 commits). **Phase 1 step 1 done.** Universe + del
 - Checksum-verified sourcing confirmed via `pytest -m network`.
 
 ## Next concrete step
-Start **Phase 1 step 2 — the trial registry** (spec §6, §A; decisions D4, D7). New session (session-split rule). Build:
-1. `registry/schema.sql` — append-only `trial` + `trial_result` tables, `research_memo`, `negative_knowledge`; `BEFORE UPDATE`/`BEFORE DELETE` triggers that `RAISE(ABORT)`.
-2. `registry/server.py` — standalone append-only writer daemon (the only writer).
-3. `registry/client.py` — read-only client; cumulative weighted N = Σ weight where `run_type='research'`, computed live.
-4. Enforce config-before-results (separate `trial` then `trial_result` writes) + run-type tagging with no retag path (D7).
-Verification bar (CLAUDE.md): prove immutability by showing an UPDATE being rejected.
-Non-blocking data-pipeline follow-ups (do only if needed): `--cross-check` flag in the driver; parallel history downloads (full-discovery run is slow — the §2.1 "budget weeks" cost).
+Start **Phase 1 step 3 — backtest runner + metrics/gates** (spec §8/§9; decisions D2, D3). New session (session-split rule). Build:
+1. `discipline/windows.py` — dev/validation/holdout `Window` object (D10 constants) + `discipline/holdout_guard.py` (OS-level access enforcement, D6) — the seam every backtest consumes.
+2. `backtest/engine.py` — vectorbt wrapper (consumes a `Window`; no vectorbt type escapes it, seam 6) + `backtest/cv.py` — purgedcv CPCV wiring.
+3. `metrics/panel.py` — deflated/probabilistic Sharpe via purgedcv; **unit test asserting DSR matches the rubenbriones reference** (D3). Reads live cumulative-N from `registry/client.py`.
+4. `gates/statistical.py` (deflated Sharpe > 0 @95% vs live N) + `gates/economic.py` (§9 viability).
+Needs the `quant` optional-deps installed (numpy/pandas/vectorbt/purgedcv) — data+registry are stdlib-only, this track is not.
+Verification bar (CLAUDE.md): show DSR matching the reference implementation.
+
+Non-blocking follow-ups (do only if needed): registry writer *daemon* process-isolation (D4 hardening); `paper_trade_run` table; `--cross-check` flag in `build_universe.py`; parallel history downloads (full-discovery run is slow — §2.1 "budget weeks").
 
 ## Open / unresolved
 - None blocking. (O1, O2 resolved 2026-07-18 — see decisions.md.)
@@ -43,6 +56,7 @@ Non-blocking data-pipeline follow-ups (do only if needed): `--cross-check` flag 
 - Forward-compat seams named (architecture.md): registry process, run-type→N, role interfaces, Window object, data-source adapter, engine wrapper.
 
 ## Session log (newest last)
+- **2026-07-18** — **Phase 1 step 2 COMPLETE — the trial registry.** Built `registry/{schema.sql,types.py,server.py,client.py}` (spec §6/§A, D4/D7). Structural immutability, not policy: `BEFORE UPDATE`/`BEFORE DELETE` triggers `RAISE(ABORT)` on all four history tables; writer (`RegistryWriter`) has no mutate method → no retag path (D7); reader (`RegistryReader`) opens `mode=ro` → driver rejects all writes (same client Phase-2 agents get, seam 1). Weight derived from level via a CHECK-enforced table; `trial_result` FK+PK makes config-before-results and one-result-per-trial structural. `cumulative_weighted_n` computed live, `pipeline-validation` excluded. 15 registry tests → **69 offline + 1 network, ruff clean.** Live proof: raw UPDATE/DELETE both aborted with "append-only … forbidden (D4)"; RO client write → "readonly database"; N=1.5 excluding a pipeline-validation trial. Deferred (non-blocking): socket-isolated writer daemon (immutability already structural). Next: backtest/metrics track (step 3).
 - **2026-07-18** — **Phase 1 step 1 COMPLETE.** Added `data/coingecko.py` + `lifecycle.cross_check_existence` (aggregator existence corroboration → `verified`, D5; immutable). Live smoke: 13,696 CoinGecko symbols, SRM verified True, fake asset False. 54 offline + 1 network test, ruff clean. Universe pipeline done end-to-end (sourcing → lifecycle → PIT ranking → hash-locked immutable snapshot → cross-check). Next: registry track (step 2).
 - **2026-07-18** — **Phase 1 step 1 near-complete.** Added `data/ohlcv.py` (delisting-aware, PIT), `data/universe.py` (PIT ranking + hash-locked immutable snapshot), `binance_source.list_all_symbols` (paginated discovery), `scripts/build_universe.py` driver (holdout-capped). Decision D12: rank by avg daily quote volume, not reconstructed market cap (user deferred; chosen for D5/D8 consistency). 48 offline + 1 network test, ruff clean. Proved delisting-awareness + immutability on live SRMUSDT data. Remaining step-1 item: aggregator cross-check. Then registry track.
 - **2026-07-18** — **Phase 1 step 1 foundation.** Branch `feat/data-pipeline`. Built config + data domain types + Binance-native adapter (checksum-verified, vendor-isolated per seam 5) + lifecycle construction. 28 tests (27 offline + 1 live network reproducing GATE 0), ruff clean. Data layer is stdlib-only so it runs without vectorbt/ccxt. Next: `data/ohlcv.py` (delisting-aware loading), aggregator cross-check, `data/universe.py` (hash-locked snapshot). Not committed.
